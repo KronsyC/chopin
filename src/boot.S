@@ -16,6 +16,7 @@
 .extern CHOPIN_kern_trap_handle_ecall
 .extern CHOPIN_kern_trap_handle_load_access_fault
 .extern CHOPIN_kern_trap_handle_illegal_instruction
+.extern CHOPIN_kern_start
 
 _start:
 
@@ -55,20 +56,11 @@ _start:
 
 
     #########################################
-    ## JUMP INTO USERSPACE
+    ## JUMP INTO KERNEL CODE (C)
     #########################################
 
-    la t0, userland 
-    csrw sepc, t0 
-    
-    li t0, 1 << 8  + 1 << 5
-    csrrc zero, sstatus, t0
+    call CHOPIN_kern_start
 
-  
-    la ra, after_userland
-
-    # call userland
-    sret
 after_userland:
     la      a0, hello_msg
   call    uart_print

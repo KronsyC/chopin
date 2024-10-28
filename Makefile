@@ -13,6 +13,9 @@ all: kernel.elf
 boot.o: src/boot.S
 	$(CC) $(CFLAGS) -c src/boot.S -o boot.o
 
+kernel.o: src/kernel.c
+	$(CC) $(CFLAGS) -c src/kernel.c -o kernel.o
+
 userland.o: src/userland.c 
 	$(CC) $(CFLAGS) -c src/userland.c -o userland.o
 
@@ -22,8 +25,8 @@ trap.o: src/trap.c
 debug_uart.o: src/debug_uart.c
 	$(CC) $(CFLAGS) -c src/debug_uart.c -o debug_uart.o
 
-kernel.elf: boot.o userland.o trap.o debug_uart.o linker.ld
-	$(LD) -T linker.ld boot.o userland.o trap.o debug_uart.o -o kernel.elf
+kernel.elf: boot.o userland.o trap.o debug_uart.o kernel.o linker.ld
+	$(LD) -T linker.ld boot.o userland.o trap.o debug_uart.o kernel.o -o kernel.elf
 
 
 

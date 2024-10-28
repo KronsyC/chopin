@@ -22,7 +22,7 @@ void CHOPIN_kern_trap_handle_load_access_fault(REG trap_code, struct RegisterCon
  
   ctx->program_return_addr += 4;
 
-  CHOPIN_kern_trap_return();
+  while(1){}
 }
 void CHOPIN_kern_trap_handle_ecall(REG code, struct RegisterContext* ctx){
   // ECall handling code
