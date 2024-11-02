@@ -1,0 +1,8 @@
+CompileFlags:
+  CompilationDatabase: ""  # Path to compile_commands.json if you have one
+  Add: 
+    - -xc  # Force C language mode
+    - -std=c11  # Use C11 standard (or another C standard you prefer)
+  Remove:
+    - -xc++  # Remove C++ language mode if present
+    - -std=c++*  # Remove any C++ standard flags

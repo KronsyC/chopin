@@ -1,0 +1,9 @@
+[workspace]
+
+members = [
+  "kernel",
+  "kernel/stage0",
+]
+
+
+resolver = "1"

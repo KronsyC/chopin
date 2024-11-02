@@ -25,8 +25,14 @@ trap.o: src/trap.c
 debug_uart.o: src/debug_uart.c
 	$(CC) $(CFLAGS) -c src/debug_uart.c -o debug_uart.o
 
-kernel.elf: boot.o userland.o trap.o debug_uart.o kernel.o linker.ld
-	$(LD) -T linker.ld boot.o userland.o trap.o debug_uart.o kernel.o -o kernel.elf
+device_tree.o: src/device_tree.c 
+	$(CC) $(CFLAGS) -c src/device_tree.c -o device_tree.o
+
+util.o: src/util.c 
+	$(CC) $(CFLAGS) -c src/util.c -o util.o
+
+kernel.elf: boot.o userland.o trap.o debug_uart.o kernel.o device_tree.o util.o linker.ld
+	$(LD) -T linker.ld boot.o userland.o trap.o debug_uart.o device_tree.o util.o kernel.o -o kernel.elf
 
 
 

@@ -5,7 +5,6 @@
 #define CHOPIN_DEBUG_UART_H
 
 
-
 void uart_print(char* d);
 void uart_putc(char c);
 

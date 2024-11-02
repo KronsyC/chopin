@@ -43,4 +43,10 @@ SECTIONS
         . += 0x4000;     /* 16KB stack */
         stack_top = .;
     }
+
+    .kernel_end : {
+        . = ALIGN(8);
+        PROVIDE(CHOPIN_kernel_memory_end = .);
+    }
+
 }
