@@ -13,4 +13,5 @@ description = "The Chopin Kernel"
 
 
 chopin-kernel-stage0 = { path = "./stage0/" }
+chopin-kpanic = {path = "./panic/"}
 sbi = "0.2.0"

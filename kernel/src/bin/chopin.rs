@@ -4,10 +4,6 @@
 use chopin_kernel as _;
 use chopin_kernel_stage0 as _;
 
-#[panic_handler]
-fn panic_handler(_panic: &core::panic::PanicInfo) -> ! {
-    loop {}
-}
 
 extern "C" {
     fn uart_print(s: *const core::ffi::c_char);

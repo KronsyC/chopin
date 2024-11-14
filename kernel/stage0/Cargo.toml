@@ -6,8 +6,10 @@ edition = "2021"
 [dependencies]
 hermit-dtb = "0.1.1"
 log = "0.4.22"
+riscv = { version = "0.12.1", features = ["s-mode"] }
 sbi = "0.2.0"
-
+chopin-kalloc = { path = "../alloc/" }
+chopin-klog = {path = "../log/"}
 
 [build-dependencies]
 cc = "1.1.34"

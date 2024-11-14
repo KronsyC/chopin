@@ -1,140 +1,16 @@
 #![no_std]
 
+use chopin_kalloc::AllocatorVariant;
+use chopin_kalloc::EarlyKernelAllocator;
+use chopin_kalloc::ALLOCATOR;
+
 extern crate alloc;
-
-///
-/// Simple chopin memory allocator
-/// just does heap scans
-///
-/// Every allocation has a leading u32
-/// representing its length
-///
-struct EarlyKernelAllocator {
-    heap_start: usize,
-    heap_end: usize,
-}
-
-impl EarlyKernelAllocator {
-    unsafe fn new(start: usize, end: usize) -> EarlyKernelAllocator {
-        println("Alloc begins at:");
-        print_u64(start as u64);
-        for i in start..end {
-            let ptr = i as *mut u8;
-            ptr.write(0x00);
-        }
-        EarlyKernelAllocator {
-            heap_start: start,
-            heap_end: end,
-        }
-    }
-}
-
-unsafe impl alloc::alloc::GlobalAlloc for EarlyKernelAllocator {
-    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        // Find a null block to allocate
-        // block must be at least layout.size + 4
-
-        println("Within alloc");
-        let min_free_size = layout.size() + 4;
-
-        let mut current_cell = self.heap_start as *mut u8;
-
-        loop {
-            if current_cell >= self.heap_end as *mut u8 {
-                println("alloc failed");
-                return core::ptr::null_mut();
-            } else if *current_cell == 0 {
-                // Check if this block has enough bytes
-
-                let cell_start = current_cell;
-                loop {
-                    current_cell = current_cell.add(1);
-
-                    if current_cell >= self.heap_end as *mut u8 || *current_cell != 0 {
-                        break;
-                    }
-                }
-
-                let byte_count = current_cell.offset_from(cell_start) as usize;
-
-                if byte_count >= min_free_size {
-                    // Create the allocation
-
-                    println("Making alloc");
-                    let len_bytes = (layout.size() as u32).to_ne_bytes();
-
-                    cell_start.add(0).write(len_bytes[0]);
-                    cell_start.add(1).write(len_bytes[1]);
-                    cell_start.add(2).write(len_bytes[2]);
-                    cell_start.add(3).write(len_bytes[3]);
-
-                    let alloc_ptr = cell_start.add(4);
-                    return alloc_ptr;
-                }
-            } else {
-                // assuming this is an allocation, read the length
-                // and jump to after it
-                let alloc_len = u32::from_ne_bytes([
-                    current_cell.add(0).read(),
-                    current_cell.add(1).read(),
-                    current_cell.add(2).read(),
-                    current_cell.add(3).read(),
-                ]);
-
-                current_cell = current_cell.add(alloc_len as usize + 4);
-            }
-        }
-    }
-    unsafe fn dealloc(&self, ptr: *mut u8, _layout: core::alloc::Layout) {
-        let alloc_len = u32::from_ne_bytes([*ptr.sub(4), *ptr.sub(3), *ptr.sub(2), *ptr.sub(1)]);
-
-        // Zero the allocation
-        for i in 0..alloc_len {
-            ptr.add(i as usize).write(0x00);
-        }
-
-        // Zero the metadata
-        ptr.sub(1).write(0x00);
-        ptr.sub(2).write(0x00);
-        ptr.sub(3).write(0x00);
-        ptr.sub(4).write(0x00);
-    }
-}
-
-enum AllocatorVariant {
-    None,
-    Early(EarlyKernelAllocator),
-}
-
-struct KernelAllocator {
-    allocator: AllocatorVariant,
-}
-
-unsafe impl alloc::alloc::GlobalAlloc for KernelAllocator {
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: core::alloc::Layout) {
-        match &self.allocator {
-            AllocatorVariant::None => panic!("Attempt to allocate with uninitialized allocator"),
-            AllocatorVariant::Early(ek) => ek.dealloc(ptr, layout),
-        }
-    }
-
-    unsafe fn alloc(&self, layout: core::alloc::Layout) -> *mut u8 {
-        match &self.allocator {
-            AllocatorVariant::None => panic!("Attempt to allocate with uninitialized allocator"),
-            AllocatorVariant::Early(ek) => ek.alloc(layout),
-        }
-    }
-}
 
 extern "C" {
     static CHOPIN_kernel_memory_end: u8;
     // static stack_top : usize;
 }
 
-#[global_allocator]
-static mut ALLOCATOR: KernelAllocator = KernelAllocator {
-    allocator: AllocatorVariant::None,
-};
 fn println(s: &str) {
     for c in s.chars() {
         sbi::legacy::console_putchar(c as u8);
@@ -219,6 +95,9 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
     println("Memory Device Type:");
     println(core::str::from_utf8(mem_dev_type).unwrap());
 
+
+
+
     mem_registry.chunks(16).for_each(|c| {
         let address = u64::from_be_bytes(c[0..8].try_into().unwrap());
         let size = u64::from_be_bytes(c[8..16].try_into().unwrap());
@@ -255,9 +134,7 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
     println("Kernel memory ends at");
 
     let heap_start_address = unsafe { core::ptr::addr_of!(CHOPIN_kernel_memory_end) as u64 };
-    unsafe {
-        print_u64(heap_start_address);
-    }
+    print_u64(heap_start_address);
 
     let early_alloc = unsafe {
         EarlyKernelAllocator::new(
@@ -266,19 +143,91 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
         )
     }; // 64K HEAP
 
-    println("Switching in allocator\n");
     unsafe {
         ALLOCATOR.allocator = AllocatorVariant::Early(early_alloc);
     }
 
-    println("allocating");
 
-    let numbers = alloc::vec![1, 2, 3, 4, 5];
 
-    println("allocated");
+    // let compat = device_tree.get_property("/soc/ethernet@10090000", "compatible").unwrap();
 
-    for el in numbers {
-        println(&alloc::format!("Number: {el}"));
+    // let compat_s = core::str::from_utf8(compat).unwrap();
+
+
+
+    let sbi_spec_ver = sbi::base::spec_version();
+
+    println(&alloc::format!("OPENSBI: {}.{}", sbi_spec_ver.major, sbi_spec_ver.minor));
+    println(&alloc::format!("Arch: {}; Vendor: {}", sbi::base::marchid(), sbi::base::mvendorid()));
+    
+
+
+    let satp = riscv::register::satp::read();
+
+    match satp.mode(){
+        riscv::register::satp::Mode::Bare => {
+            println("No protection")
+        },
+        riscv::register::satp::Mode::Sv39 => {
+            println("SV39")
+        },
+        riscv::register::satp::Mode::Sv48 => {
+            println("SV48")
+        },
+        riscv::register::satp::Mode::Sv57 => {
+            println("SV57")
+        },
+        riscv::register::satp::Mode::Sv64 => {
+            println("SV64")
+        }
     }
+    
+    chopin_klog::initialize_logger();
+    
+    use alloc::vec::Vec;
+
+    #[derive(Debug)]
+    struct HARTInfo<'a>{
+        hart_id : u32,
+        status : &'a str,
+        mmu : Option<&'a str>
+    }
+
+    let mut harts = Vec::with_capacity(10);
+
+    use alloc::format;
+    device_tree.enum_subnodes("/cpus").for_each(|cpu_node| {
+        log::info!("CPU CORE: {cpu_node}");
+        let cpu_path = format!("/cpus/{cpu_node}");
+
+        let dev_type = device_tree.get_property(&cpu_path, "device_type").unwrap();
+        let reg = device_tree.get_property(&cpu_path, "reg").unwrap();
+        let status = device_tree.get_property(&cpu_path, "status").unwrap();
+        let mmu_type = device_tree.get_property(&cpu_path, "mmu-type").map(|t| core::str::from_utf8(t).unwrap_or("?"));
+
+        let status_str = core::str::from_utf8(status).unwrap();
+
+
+        let hart_number = u32::from_be_bytes(reg.try_into().unwrap());
+
+        harts.push(HARTInfo{
+            hart_id: hart_number,
+            status: status_str,
+            mmu: mmu_type
+        });
+        log::info!("Pushed");
+    });
+
+    log::info!("Added all HARTs");
+
+    for h in harts{
+        log::info!("HART: {h:?}");
+    }
+    // let _ = harts.iter();;
+
+    log::info!("Iterated");
+    // for el in numbers {
+    //     println(&alloc::format!("Number: {el}"));
+    // }
     loop {}
 }
