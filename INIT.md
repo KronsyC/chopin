@@ -13,7 +13,7 @@ This document aims to outline the initialization process used by the CHOPIN kern
 
 The Pre-Initialization phase of the kernel is solely responsible 
 for correctly creating a basic environment for the next stage of the kernel 
-namely finding kernel memory.
+namely finding kernel memory, and making sure the kernel is running on the right hart
 
 2. Stage 1 / Initialization 
 

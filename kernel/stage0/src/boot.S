@@ -18,6 +18,8 @@
 .extern CHOPIN_kern_trap_handle_illegal_instruction
 .extern CHOPIN_kern_stage0
 
+
+
 _start:
 
     ################################################
@@ -62,74 +64,22 @@ _start:
     call CHOPIN_kern_stage0
 
 after_userland:
-    la      a0, hello_msg
-  call    uart_print
     # Loop forever
 1:  wfi
     j       1b
 
 
-# user_code:
-#     la      a0, user_msg
-#     call    uart_print
-#     .word 0xFFFFFFFF
-#     la      a0, user_msg
-#     call    uart_print
 
-# Print a single character in a0
-.global uart_putc
-uart_putc:
-    # Save registers we'll use
-    addi    sp, sp, -16
-    sd      t0, 0(sp)
-    sd      t1, 8(sp)
+# This is the prelude code run on the boot of every HART 
+# Once basis init is complete 
+.global CHOPIN_kern_stage0_kcore_init
+CHOPIN_kern_stage0_kcore_init:
+  # a1 contains boot flags
+  # 0 => Initialize Stack (t/f)
 
-    # Get UART base
-    li      t0, UART0
 
-1:  # Wait for UART TX FIFO to be ready
-    lw      t1, UART_TXDATA(t0)
-    bltz    t1, 1b         # If MSB is set, FIFO is full
-
-    # Send character
-    sw      a0, UART_TXDATA(t0)
-
-    # Restore registers
-    ld      t1, 8(sp)
-    ld      t0, 0(sp)
-    addi    sp, sp, 16
-    ret
-
-# Print null-terminated string pointed to by a0
-.global uart_print
-uart_print:
-    # Save registers
-    addi    sp, sp, -32
-    sd      ra, 0(sp)
-    sd      s0, 8(sp)
-    sd      a0, 16(sp)
-
-    # Save string pointer
-    mv      s0, a0
-
-1:  # Load byte from string
-    lbu     a0, (s0)
-    beqz    a0, 2f         # If null, we're done
-
-    # Print character
-    call    uart_putc
-
-    # Next character
-    addi    s0, s0, 1
-    j       1b
-
-2:  # Restore registers
-    ld      a0, 16(sp)
-    ld      s0, 8(sp)
-    ld      ra, 0(sp)
-    addi    sp, sp, 32
-    ret
-
+  andi t0, a0, 1
+  
 
 setup_trap_vector:
 
