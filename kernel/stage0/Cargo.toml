@@ -10,6 +10,7 @@ riscv = { version = "0.12.1", features = ["s-mode"] }
 sbi = "0.2.0"
 chopin-kalloc = { path = "../alloc/" }
 chopin-klog = {path = "../log/"}
+chopin-memory = {path="../memory/"}
 
 [build-dependencies]
 cc = "1.1.34"

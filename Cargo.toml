@@ -5,7 +5,8 @@ members = [
   "kernel/stage0",
   "kernel/alloc",
   "kernel/log",
-  "kernel/panic"
+  "kernel/panic",
+  "kernel/memory"
 ]
 
 

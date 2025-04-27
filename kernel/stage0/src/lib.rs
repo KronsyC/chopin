@@ -1,15 +1,11 @@
 #![no_std]
 
-pub const PAGE_SIZE_BYTES : usize = 4096;
+pub const PAGE_SIZE_BYTES: usize = 4096;
 
-use core::ptr::null;
-
-use alloc::fmt::format;
 use alloc::vec::Vec;
 use chopin_kalloc::AllocatorVariant;
 use chopin_kalloc::EarlyKernelAllocator;
 use chopin_kalloc::ALLOCATOR;
-use log::logger;
 
 extern crate alloc;
 
@@ -186,11 +182,10 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
             heap_start_address as usize + 32 + 64_000,
         )
     }; // 64K HEAP
-       
 
-    let early_heap_region = MemoryRegion{
+    let early_heap_region = MemoryRegion {
         addr: heap_start_address as usize + 32,
-        size: 64_000
+        size: 64_000,
     };
 
     unsafe {
@@ -199,7 +194,6 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
 
     println(&alloc::format!("Initiated early kernel allocator"));
 
-    // let compat = device_tree.get_property("/soc/ethernet@10090000", "compatible").unwrap();
 
     // let compat_s = core::str::from_utf8(compat).unwrap();
     let sbi_spec_ver = sbi::base::spec_version();
@@ -335,8 +329,7 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
     };
 
     device_tree.enum_subnodes("/soc").for_each(|sn| {
-        log::info!("::");
-        log::info!("SOC: {sn}");
+        log::info!("== SOC: {sn}");
 
         // Extract compaibility value
         let path = format!("/soc/{sn}");
@@ -353,22 +346,22 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
             let val = u32::from_be_bytes(phandle.try_into().unwrap_or_default());
             log::info!(">: PHandle: {val:#08X}");
         } else {
-            log::warn!("No phandle");
+            log::warn!(">: No phandle");
         }
 
         if let Some(reg) = device_tree.get_property(&path, "reg") {
             let addrs = soc_cellsize.interpret_reg(reg);
-            log::info!(">: Got mem addrs");
+            log::info!(">: MMIO ADDRS");
             for addr in addrs.iter() {
                 log::info!(">: :: At {:#X} [{:#X} bytes]", addr.0, addr.1);
             }
         } else {
-            log::warn!("No mem addrs");
+            log::warn!(">: No mem addrs");
         }
 
-        // device_tree.enum_properties(&path).for_each(|sn| {
-        //     log::info!(">> {sn}");
-        // });
+        device_tree.enum_properties(&path).for_each(|sn| {
+            log::info!(">> {sn}");
+        });
     });
 
     log::info!("");
@@ -395,8 +388,8 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
         }
     });
 
-    log::info!("");
-    log::info!("Reserved Memory ::");
+    // log::info!("");
+    // log::info!("Reserved Memory ::");
     device_tree
         .enum_subnodes("/reserved-memory")
         .for_each(|sn| {
@@ -404,9 +397,9 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
             log::info!(">: {sn}");
             if let Some(reg) = device_tree.get_property(&path, "reg") {
                 let addrs = root_cellsize.interpret_reg(reg);
-                log::info!(">: Got mem addrs");
+                // log::info!(">: Got mem addrs");
                 for addr in addrs.iter() {
-                    log::info!(">: :: At {:#X} [{:#X} bytes]", addr.0, addr.1);
+                    // log::info!(">: :: At {:#X} [{:#X} bytes]", addr.0, addr.1);
 
                     mmap.cut_region(MemoryRegion {
                         addr: addr.0 as usize,
@@ -415,11 +408,10 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
                 }
             }
 
-            device_tree.enum_properties(&path).for_each(|p| {
-                log::info!("::::: {p}");
-            });
+            // device_tree.enum_properties(&path).for_each(|p| {
+            //     log::info!("::::: {p}");
+            // });
         });
-
 
     // Save the kernel and heap
     mmap.cut_region(kernel_region);
@@ -439,33 +431,65 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
 
     log::info!("Memory Map: {mmap:?}");
 
+    // let mut root_page_table = mmap
+    //     .bite_first_aligned(PAGE_SIZE_BYTES, PAGE_SIZE_BYTES)
+    //     .expect("Failed to allocate root page table");
+    //
+    // unsafe {
+    //     root_page_table.zero();
+    // };
+    // log::info!("Root page table lives at: {root_page_table:?}");
+    //
+    // let pt_entries = unsafe { root_page_table.as_slice::<PageTableEntry>() };
 
-    // for region in mmap.regions {
-    //     for i in 0..region.size {
-    //         let addr = region.addr + i;
-    //         let addr = addr as *mut u8;
-    //         unsafe{ *addr = 0x69 };
-    //     }
-    // }
-    log::info!("Overwrote free memory with marker");
+    // let c = pt_entries.len();
+    // log::info!("PT has {c} entries");
 
+    log::info!("Constructing the frame table");
 
+    let mut ft = chopin_memory::frame_table::FrameTable {
+        segments: Vec::new(),
+    };
 
-    let mut root_page_table = mmap.bite_first_aligned(PAGE_SIZE_BYTES, PAGE_SIZE_BYTES).expect("Failed to allocate root page table");
+    for region in mmap.regions {
+        let segment =
+            chopin_memory::frame_table::FrameSegment::initialize(region.addr, region.size);
 
-    unsafe { root_page_table.zero(); };
-    log::info!("Root page table lives at: {root_page_table:?}");
+        match segment {
+            Some(s) => {
+                log::info!("Initialized frame segment at {region:?}");
+                ft.segments.push(s);
+            }
+            None => {
+                log::warn!("Memory region too small to create segment: {region:?}");
+            }
+        }
+        // ft.segmens.push(segment);
+    }
 
+    log::info!("Constructed frame table");
 
-    let pt_entries = unsafe { root_page_table.as_slice::<PageTableEntry>() };
+    let root_page_table = ft
+        .alloc_front(1, chopin_memory::frame_table::FrameState::PageTable, 0)
+        .unwrap();
 
-    let c = pt_entries.len();
-    log::info!("PT has {c} entries");
+    unsafe { root_page_table.zero() };
+
+    log::info!("Root PT at {root_page_table:?}");
+
+    let entries =
+        unsafe { root_page_table.as_slice::<chopin_memory::page_table::PageTableEntry>() };
+
+    unsafe {
+        chopin_memory::KERNEL_PAGE_TABLE
+            .write(chopin_memory::page_table::PageTable { entries })
+    };
+    unsafe { chopin_memory::KERNEL_FRAME_TABLE.write(ft) };
     // for pte in pt_entries{
     //     let k = pte.kind();
     //     log::info!("PTK: {k:?}");
     // }
-    
+
     loop {}
 
     // Allocate stack space for every hart we have
@@ -583,7 +607,11 @@ pub struct MemoryRegion {
 
 impl core::fmt::Debug for MemoryRegion {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "MRegion [ at = {:#X}, len = {:#X} ]", self.addr, self.size)
+        write!(
+            f,
+            "MRegion [ at = {:#X}, len = {:#X} ]",
+            self.addr, self.size
+        )
     }
 }
 
@@ -615,13 +643,13 @@ impl MemoryRegion {
     }
 
     ///
-    /// Zero out the memory region 
+    /// Zero out the memory region
     ///
-    /// # Safety 
+    /// # Safety
     ///
     /// this region must be writable memory
     ///
-    pub unsafe fn zero(&mut self){
+    pub unsafe fn zero(&mut self) {
         let ptr = self.addr as *mut u8;
 
         core::ptr::write_bytes(ptr, 0, self.size);
@@ -673,43 +701,32 @@ impl MemoryMap {
         self.regions.sort_by_key(|v| v.addr);
     }
 
-
     ///
     /// Bite out the first memory region of that size
     ///
-    pub fn bite_first(
-        &mut self,
-        size_bytes : usize
-    ) -> Option<MemoryRegion>{
+    pub fn bite_first(&mut self, size_bytes: usize) -> Option<MemoryRegion> {
+        for r in &mut self.regions {
+            if r.size >= size_bytes {
+                // We have enough space in this region,
+                // trim the start
 
-        for r in &mut self.regions{
-           if r.size >= size_bytes{
+                let start = r.addr;
+                r.addr += size_bytes;
+                r.size -= size_bytes;
 
-               // We have enough space in this region, 
-               // trim the start 
-
-               let start = r.addr;
-               r.addr += size_bytes;
-               r.size -= size_bytes;
-
-               return Some(MemoryRegion{
-                   addr: start,
-                   size: size_bytes
-               });
-           } 
+                return Some(MemoryRegion {
+                    addr: start,
+                    size: size_bytes,
+                });
+            }
         }
 
         None
-
     }
     ///
     /// Bite out the first memory region of the given size and alignment
     ///
-    pub fn bite_first_aligned(
-        &mut self,
-        size_bytes: usize,
-        align: usize,
-    ) -> Option<MemoryRegion> {
+    pub fn bite_first_aligned(&mut self, size_bytes: usize, align: usize) -> Option<MemoryRegion> {
         for i in 0..self.regions.len() {
             let region = &mut self.regions[i];
 
@@ -780,109 +797,3 @@ impl MemoryMap {
 fn align_up(addr: usize, align: usize) -> usize {
     (addr + align - 1) & !(align - 1)
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PTEKind{
-    NextLevel,
-    ReadOnly,
-    ReadWrite,
-    ExecOnly,
-    ReadExecute,
-    ReadWriteExecute,
-
-
-    ///
-    /// Reserved #1 
-    ///
-    /// this is the case of write-only 
-    ///
-    _Reserved1,
-
-    ///
-    /// Reserved #2 
-    ///
-    /// this is the case of write-execute
-    ///
-    _Reserved2
-}
-
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct PageTableEntry(pub u64);
-
-impl PageTableEntry {
-    pub const FLAG_V: u64 = 1 << 0;
-    pub const FLAG_R: u64 = 1 << 1;
-    pub const FLAG_W: u64 = 1 << 2;
-    pub const FLAG_X: u64 = 1 << 3;
-    pub const FLAG_U: u64 = 1 << 4;
-    pub const FLAG_G: u64 = 1 << 5;
-    pub const FLAG_A: u64 = 1 << 6;
-    pub const FLAG_D: u64 = 1 << 7;
-
-    pub fn is_valid(&self) -> bool {
-        self.0 & Self::FLAG_V != 0
-    }
-
-    pub fn is_leaf(&self) -> bool {
-        self.0 & (Self::FLAG_R | Self::FLAG_W | Self::FLAG_X) != 0
-    }
-
-    pub fn phys_addr(&self) -> u64 {
-        let ppn = (self.0 >> 10) & 0xFFFFFFFFFFF;
-        ppn << 12
-    }
-
-    pub fn set(&mut self, phys_addr: u64, flags: u64) {
-        let ppn = phys_addr >> 12;
-        self.0 = (ppn << 10) | flags;
-    }
-
-    pub fn clear(&mut self) {
-        self.0 = 0;
-    }
-
-    pub fn is_unused(&self) -> bool {
-        self.0 == 0
-    }
-
-
-    pub fn kind(&self) -> PTEKind{
-        let x = ((self.0 >> 3) & 1) != 0;
-        let w = ((self.0 >> 2) & 1) != 0;
-        let r = ((self.0 >> 1) & 1) != 0;
-
-        match (x, w, r){
-            (false, false, false) => PTEKind::NextLevel,
-            (true, false, false) => PTEKind::ExecOnly,
-            (true, true, false) => PTEKind::_Reserved2,
-            (true, true, true) => PTEKind::ReadWriteExecute,
-            (false, true, true) => PTEKind::ReadWrite,
-            (false, false, true) => PTEKind::ReadOnly,
-            (false, true, false) => PTEKind::_Reserved1,
-            (true, false, true) => PTEKind::ReadExecute
-        }
-    }
-
-    pub fn set_kind(&mut self, kind: PTEKind) {
-        // Clear bits R, W, X (bits 1, 2, 3)
-        self.0 &= !(0b111 << 1);
-
-        // Set based on kind
-        let (x, w, r) = match kind {
-            PTEKind::NextLevel         => (false, false, false),
-            PTEKind::ExecOnly          => (true,  false, false),
-            PTEKind::ReadOnly          => (false, false, true),
-            PTEKind::ReadExecute       => (true,  false, true),
-            PTEKind::ReadWrite         => (false, true,  true),
-            PTEKind::ReadWriteExecute  => (true,  true,  true),
-            PTEKind::_Reserved1        => (false, true,  false),
-            PTEKind::_Reserved2        => (true,  true,  false),
-        };
-
-        self.0 |= ((r as u64) << 1)
-                | ((w as u64) << 2)
-                | ((x as u64) << 3);
-    }
-}
-
