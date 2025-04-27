@@ -3,7 +3,7 @@ pub mod virt_map;
 
 pub use bootstrap::bootstrap_pt;
 
-use crate::frame_table::{FrameTable, MemoryAllocation};
+use crate::frame_table::{self, FrameTable, MemoryAllocation};
 
 unsafe fn pte_pointer_as_mut_slice(pte_ptr: *mut PageTableEntry) -> &'static mut [PageTableEntry] {
     // assume 512 entries
@@ -132,8 +132,10 @@ impl PageTable {
 
         // log::debug!("Index at 280 > {l1_index} > {l2_index}");
 
-        let l1_pt = unsafe { PageTable::from_pointer(self.entries[self_ref_root_index.as_addr()].phys_addr()) };
-            // unsafe { self.allocate_intermediary(self_ref_root_index, frame_table) }.unwrap();
+        let l1_pt = unsafe {
+            PageTable::from_pointer(self.entries[self_ref_root_index.as_addr()].phys_addr())
+        };
+        // unsafe { self.allocate_intermediary(self_ref_root_index, frame_table) }.unwrap();
 
         // assert!(
         //     !l2.allocated,
@@ -179,12 +181,10 @@ impl PageTable {
             allocation
         } else {
             // Best case - allocate within existing l2
-            let l2_pt = unsafe { PageTable::from_pointer(l2_ref.phys_addr())};
-
+            let l2_pt = unsafe { PageTable::from_pointer(l2_ref.phys_addr()) };
 
             let entry = &mut l2_pt.entries[l2_index];
 
-            
             assert!(entry.is_unused(), "Target PTE is unused");
 
             entry.set(
@@ -305,6 +305,56 @@ impl PageTable {
         Err(())
     }
 
+    pub unsafe fn virtually_map(
+        &mut self,
+        frame_table: &mut FrameTable,
+        l0_index: PageTableIndex,
+        l1_index: PageTableIndex,
+        l2_index: PageTableIndex,
+        hardware_address: usize,
+        flags: u64,
+    ) {
+        let l0_entry = self.entries[l0_index.as_addr()];
+
+        let l1_table = if l0_entry.kind() == PTEKind::NextLevel && l0_entry.phys_addr() != 0 {
+            unsafe { PageTable::from_pointer(l0_entry.phys_addr()) }
+        } else if l0_entry.kind() == PTEKind::NextLevel && l0_entry.phys_addr() == 0 {
+            let raw_pt = unsafe { self.meta_allocate_page_table(frame_table) };
+            let pt = unsafe { PageTable::from_pointer(raw_pt.phys_addr) };
+
+            self.entries[l0_index.as_addr()].set(raw_pt.phys_addr as u64, PageTableEntry::FLAG_V);
+
+            pt
+        } else {
+            panic!()
+        };
+
+        let l1_entry = l1_table.entries[l1_index.as_addr()];
+
+        let l2_table = if l1_entry.kind() == PTEKind::NextLevel && l1_entry.phys_addr() != 0 {
+            unsafe { PageTable::from_pointer(l1_entry.phys_addr()) }
+        } else if l1_entry.kind() == PTEKind::NextLevel && l1_entry.phys_addr() == 0 {
+            let raw_pt = unsafe { self.meta_allocate_page_table(frame_table) };
+            let pt = unsafe { PageTable::from_pointer(raw_pt.phys_addr) };
+
+            l1_table.entries[l1_index.as_addr()].set(raw_pt.phys_addr as u64, PageTableEntry::FLAG_V);
+
+            pt
+        } else {
+            panic!()
+        };
+
+        let l2_entry = l2_table.entries[l2_index.as_addr()];
+
+        if l2_entry.is_unused() {
+            // Set it
+            l2_table.entries[l2_index.as_addr()].set(hardware_address as u64, flags);
+            let k = l2_table.entries[l2_index.as_addr()].kind();
+        } else {
+            panic!()
+        }
+    }
+
     ///
     /// Yield the first index of a run capable of storing `page_count`
     ///
@@ -415,11 +465,6 @@ impl PageTableEntry {
         (ppn << 12) as usize
     }
 
-    pub fn set(&mut self, phys_addr: u64, flags: u64) {
-        let ppn = phys_addr >> 12;
-        self.0 = (ppn << 10) | flags;
-    }
-
     pub fn clear(&mut self) {
         self.0 = 0;
     }
@@ -443,6 +488,18 @@ impl PageTableEntry {
             (false, true, false) => PTEKind::_Reserved1,
             (true, false, true) => PTEKind::ReadExecute,
         }
+    }
+    pub fn set(&mut self, phys_addr: u64, flags: u64) {
+        let ppn = phys_addr >> 12;
+
+        // Assert that PPN fits in 44 bits (Sv39 standard)
+        assert!(
+            ppn < (1 << 44),
+            "Physical address too large for PPN field: {:#x}",
+            phys_addr
+        );
+
+        self.0 = (ppn << 10) | flags;
     }
 
     pub fn set_kind(&mut self, kind: PTEKind) {

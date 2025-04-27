@@ -388,8 +388,6 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
         }
     });
 
-    // log::info!("");
-    // log::info!("Reserved Memory ::");
     device_tree
         .enum_subnodes("/reserved-memory")
         .for_each(|sn| {
@@ -486,29 +484,56 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
 
 
     unsafe { chopin_memory::page_table::bootstrap_pt(&mut pt, &mut ft) };
-    // unsafe {
-    //     chopin_memory::KERNEL_PAGE_TABLE
-    //         .write(chopin_memory::page_table::PageTable { entries })
-    // };
-    // unsafe { chopin_memory::KERNEL_FRAME_TABLE.write(ft) };
-    // for pte in pt_entries{
-    //     let k = pte.kind();
-    //     log::info!("PTK: {k:?}");
-    // }
 
-    for i in 0..8000{
-        unsafe{pt.meta_allocate_page_table(&mut ft)};
+
+    // Identity map kernel memory into virtual memory 
+    // also identity map the EKH (early kernel heap)
+
+
+    let heap_end = heap_start_address + 64_000;
+    let idmap_start = start_address as usize;
+    let idmap_end = align_up(heap_end as usize, 4096);
+    let idmap_page_count = idmap_end - idmap_start >> 12;
+
+    log::info!("Identity mapping: {:#X?} to {:#X} ({} pages)", start_address, idmap_end, idmap_page_count);
+    let sp: usize;
+    unsafe {
+        core::arch::asm!("mv {}, sp", out(reg) sp);
     }
 
-    log::info!("Mapped all entries");
+    log::info!("Stack PTR: {sp:#X}");
+    unsafe{chopin_memory::page_table::virt_map::virtual_map_linear(&mut pt, &mut ft, chopin_memory::page_table::virt_map::PageRegion{
+        address: idmap_start,
+        count: idmap_page_count
+    }, idmap_start)};
+    let satp_value = construct_satp(pt.entries.as_ptr() as usize);
 
-    // chopin_memory::KERNEL_FRAME_TABLE.assume_init_ref().
+    unsafe {
+        log::info!("Setting SATP");
+        core::arch::asm!("csrw satp, {}", in(reg) satp_value);
+        core::arch::asm!("sfence.vma x0, x0"); // flush all
+        log::info!("Set SATP");
+        core::arch::asm!("fence.i");
+    }
+   
 
+    log::info!("Finished INIT");
     loop {}
 
     // Allocate stack space for every hart we have
 }
 
+pub fn construct_satp(root_page_table_phys_addr: usize) -> usize {
+    const MODE_SV39: usize = 8;
+    const ASID: usize = 0;
+
+    let ppn = root_page_table_phys_addr >> 12; // divide by 4K
+
+    (MODE_SV39 << 60) | (ASID << 44) | ppn
+}
+#[inline(always)]
+pub unsafe fn set_satp(value: usize) {
+}
 #[derive(Debug, Clone)]
 pub struct CompatibleEntry<'a> {
     pub manufacturer: &'a str,
