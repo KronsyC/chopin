@@ -170,7 +170,7 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
             println(s);
         });
 
-    let heap_start_address = unsafe { core::ptr::addr_of!(CHOPIN_kernel_memory_end) as u64 };
+    let heap_start_address = core::ptr::addr_of!(CHOPIN_kernel_memory_end) as u64;
     print("Kernel memory ends at :: ");
 
     print_u64(heap_start_address);
@@ -480,15 +480,29 @@ extern "C" fn CHOPIN_kern_stage0(hart_id: u32, device_tree: *const u8) -> ! {
     let entries =
         unsafe { root_page_table.as_slice::<chopin_memory::page_table::PageTableEntry>() };
 
-    unsafe {
-        chopin_memory::KERNEL_PAGE_TABLE
-            .write(chopin_memory::page_table::PageTable { entries })
+    let mut pt = chopin_memory::page_table::PageTable{
+        entries
     };
-    unsafe { chopin_memory::KERNEL_FRAME_TABLE.write(ft) };
+
+
+    unsafe { chopin_memory::page_table::bootstrap_pt(&mut pt, &mut ft) };
+    // unsafe {
+    //     chopin_memory::KERNEL_PAGE_TABLE
+    //         .write(chopin_memory::page_table::PageTable { entries })
+    // };
+    // unsafe { chopin_memory::KERNEL_FRAME_TABLE.write(ft) };
     // for pte in pt_entries{
     //     let k = pte.kind();
     //     log::info!("PTK: {k:?}");
     // }
+
+    for i in 0..8000{
+        unsafe{pt.meta_allocate_page_table(&mut ft)};
+    }
+
+    log::info!("Mapped all entries");
+
+    // chopin_memory::KERNEL_FRAME_TABLE.assume_init_ref().
 
     loop {}
 

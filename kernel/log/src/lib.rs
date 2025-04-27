@@ -7,7 +7,7 @@ pub static KERNEL_LOGGER : ChopinLogger = ChopinLogger;
 
 pub fn initialize_logger(){
     log::set_logger(&KERNEL_LOGGER).unwrap();
-    log::set_max_level(log::LevelFilter::Info);
+    log::set_max_level(log::LevelFilter::Debug);
 }
 
 

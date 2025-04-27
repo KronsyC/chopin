@@ -1,6 +1,8 @@
 use alloc::vec::Vec;
 use core::ops::Add;
 
+use crate::PAGE_SIZE_B;
+
 ///
 /// This data structure tracks all frames
 /// available on the system
@@ -36,6 +38,19 @@ pub struct FrameSegment {
 }
 
 impl FrameTable {
+
+    pub fn root_frame_address(&self) -> usize{
+        self.segments[0].first_page_addr
+    }
+
+    pub unsafe fn iter_front(&self) -> impl Iterator<Item = usize> + '_ {
+        FrameTableFrontIterator {
+            segments: &self.segments,
+            current_segment: 0,
+            current_page_idx: 0,
+            stop: false,
+        }
+    }
     /// Tries to allocate `count` contiguous pages from any segment.
     pub fn alloc_front(
         &mut self,
@@ -84,39 +99,66 @@ impl FrameSegment {
         }
     }
 
+    pub unsafe fn iter_front(&self) -> impl Iterator<Item = usize> {
+        (0..self.page_count)
+            .map(move |index| (index, unsafe { self.get_metadata(index) }))
+            .take_while(|(_, meta)| meta.state() != FrameState::Free)
+            .map(move |(index, _)| self.first_page_addr + index * 4096)
+    }
+
     ///
     /// Initialize a frame segment from a continuous memory region.
     /// Returns `None` if the region is too small to contain both metadata and at least one page.
     ///
-    pub fn initialize(start_address: usize, size: usize) -> Option<FrameSegment> {
-        const PAGE_SIZE: usize = 4096;
-        const METADATA_SIZE_PER_PAGE: usize = core::mem::size_of::<FrameMetadataEntry>();
+pub fn initialize(start_address: usize, size: usize) -> Option<FrameSegment> {
+    const PAGE_SIZE: usize = 4096;
+    const METADATA_SIZE_PER_PAGE: usize = core::mem::size_of::<FrameMetadataEntry>();
 
-        // Max number of pages if metadata were "free"
-        let max_possible_pages = size / (PAGE_SIZE + METADATA_SIZE_PER_PAGE);
-
-        if max_possible_pages == 0 {
-            return None;
-        }
-
-        // Compute actual metadata size and align it up to the next page
-        let raw_metadata_bytes = max_possible_pages * METADATA_SIZE_PER_PAGE;
-        let aligned_metadata_bytes = align_up(raw_metadata_bytes, PAGE_SIZE);
-
-        // Now compute how many pages we can still fit after reserving metadata
-        let usable_bytes = size - aligned_metadata_bytes;
-        let usable_page_count = usable_bytes / PAGE_SIZE;
-
-        if usable_page_count == 0 {
-            return None;
-        }
-
-        Some(FrameSegment {
-            frame_metadata_start_addr: start_address,
-            first_page_addr: start_address + aligned_metadata_bytes,
-            page_count: usable_page_count,
-        })
+    if size < PAGE_SIZE {
+        return None;
     }
+
+    // Max number of pages if metadata were "free"
+    let max_possible_pages = size / (PAGE_SIZE + METADATA_SIZE_PER_PAGE);
+
+    if max_possible_pages == 0 {
+        return None;
+    }
+
+    // Compute raw metadata bytes needed
+    let raw_metadata_bytes = max_possible_pages * METADATA_SIZE_PER_PAGE;
+
+    // Align metadata size up to page boundary
+    let aligned_metadata_bytes = align_up(raw_metadata_bytes, PAGE_SIZE);
+
+    // Compute the start address of usable pages
+    let mut first_page_addr = start_address + aligned_metadata_bytes;
+    first_page_addr = align_up(first_page_addr, PAGE_SIZE);
+
+    // Calculate usable bytes after metadata
+    let total_used = first_page_addr - start_address;
+    if total_used >= size {
+        return None;
+    }
+
+    let usable_bytes = size - total_used;
+    let usable_page_count = usable_bytes / PAGE_SIZE;
+
+    if usable_page_count == 0 {
+        return None;
+    }
+
+    assert!(
+        first_page_addr % PAGE_SIZE == 0,
+        "first_page_addr must be page-aligned"
+    );
+
+    Some(FrameSegment {
+        frame_metadata_start_addr: start_address,
+        first_page_addr,
+        page_count: usable_page_count,
+    })
+}
 
     /// Allocates `count` contiguous 4K pages from this segment.
     /// Returns a `MemoryAllocation` with metadata set, or `None` if no space.
@@ -377,5 +419,47 @@ impl core::fmt::Debug for MemoryAllocation {
             "MemoryAllocation {{ addr: {:#x}, pages: {}, size: {} KiB, pid: {}, state: {:?} }}",
             self.phys_addr, self.page_count, size_kib, self.pid, self.state,
         )
+    }
+}
+
+pub struct FrameTableFrontIterator<'a> {
+    segments: &'a [FrameSegment],
+    current_segment: usize,
+    current_page_idx: usize,
+    stop: bool,
+}
+
+impl<'a> Iterator for FrameTableFrontIterator<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.stop {
+            return None;
+        }
+
+        while self.current_segment < self.segments.len() {
+            let segment = &self.segments[self.current_segment];
+
+            if self.current_page_idx >= segment.page_count {
+                // Finished this segment successfully, go to next
+                self.current_segment += 1;
+                self.current_page_idx = 0;
+                continue;
+            }
+
+            let meta = unsafe { segment.get_metadata(self.current_page_idx) };
+
+            if meta.state() == FrameState::Free {
+                // Hit a free page => stop entire iteration
+                self.stop = true;
+                return None;
+            }
+
+            let addr = segment.first_page_addr + self.current_page_idx * 4096;
+            self.current_page_idx += 1;
+            return Some(addr);
+        }
+
+        None
     }
 }
